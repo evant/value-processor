@@ -17,7 +17,7 @@ if (isAndroid) {
 
 task javadocsJar(type: Jar) {
     classifier = 'javadoc'
-    from javadoc.destinationDir
+    from dokka.outputDirectory
 }
 task sourcesJar(type: Jar) {
     classifier = 'sources'

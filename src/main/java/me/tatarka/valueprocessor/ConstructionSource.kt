@@ -12,13 +12,32 @@ import javax.lang.model.util.Types
  * How a [Value] can be constructed. Either a constructor, factory method, or builder.
  */
 sealed class ConstructionSource {
+    /**
+     * The target [Value] class to construct.
+     */
     abstract val targetClass: TypeElement
+    /**
+     * The executable element to construct the [Value]. This may be a constructor, factory method, or builder.
+     */
     abstract val constructionElement: ExecutableElement
+    /**
+     * If this source is a constructor (either of the value or the builder).
+     */
     abstract val isConstructor: Boolean
+    /**
+     * If this source is a builder.
+     */
     abstract val isBuilder: Boolean
-    val constructionClass: TypeElement by lazy(LazyThreadSafetyMode.NONE) { constructionElement.enclosingElement as TypeElement }
 
-    class Constructor internal constructor(val constructor: ExecutableElement) : ConstructionSource() {
+    /**
+     * A [Value] constructor.
+     */
+    class Constructor internal constructor(
+        /**
+         * A [Value] constructor element.
+         */
+        val constructor: ExecutableElement
+    ) : ConstructionSource() {
         override val targetClass: TypeElement by lazy(LazyThreadSafetyMode.NONE) {
             constructor.enclosingElement as TypeElement
         }
@@ -30,7 +49,16 @@ sealed class ConstructionSource {
         override val isBuilder: Boolean = false
     }
 
-    class Factory internal constructor(val types: Types, val method: ExecutableElement) : ConstructionSource() {
+    /**
+     * A [Value] factory method.
+     */
+    class Factory internal constructor(
+        private val types: Types,
+        /**
+         * A [Value] factory method element.
+         */
+        val method: ExecutableElement
+    ) : ConstructionSource() {
         override val targetClass: TypeElement by lazy(LazyThreadSafetyMode.NONE) {
             types.asElement(method.returnType) as TypeElement
         }

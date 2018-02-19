@@ -1,3 +1,18 @@
+pluginManagement {
+    repositories {
+        maven {  url "https://dl.bintray.com/kotlin/kotlin-eap" }
+        gradlePluginPortal()
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "org.jetbrains.dokka") {
+                useModule("org.jetbrains.dokka:dokka-gradle-plugin:${requested.version}")
+            }
+        }
+    }
+}
+
+
 rootProject.name = 'value-processor'
 rootProject.buildFileName = 'build.gradle.kts'
 

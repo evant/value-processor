@@ -1,6 +1,6 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
-group = "me.tatarka"
+group = "me.tatarka.value"
 version = "0.1"
 
 buildscript {
@@ -22,6 +22,7 @@ buildscript {
 
 plugins {
     `java-library`
+    id("org.jetbrains.dokka") version "0.9.16-eap-3"
 }
 
 apply {
@@ -48,4 +49,3 @@ configure<JavaPluginConvention> {
 tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "1.8"
 }
-
