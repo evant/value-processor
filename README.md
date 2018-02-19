@@ -5,7 +5,7 @@ Helper for creating annotation processors that create/read value objects.
 
 ### Gradle
 
-```
+```groovy
 dependencies {
   compile 'me.tatarka.value:value-processor:0.1'
 }
@@ -13,7 +13,7 @@ dependencies {
 
 ### Maven
 
-```
+```xml
 <dependency>
   <groupId>me.tatarka.value</groupId>
   <artifactId>value-processor</artifactId>
@@ -56,7 +56,7 @@ Then create a `Value` from an `Element`. There are various methods based on what
     }
 ```
 
-You can then iterator through the properties to generate your code.
+You can then iterate through the properties to generate your code.
 
 ```java
 // all properties
@@ -64,7 +64,7 @@ for (Property<?> property : value.getProperties()) {
     ...
 }
 // of a specific kind
-for (Property.Getter getter : value.getGetters()) {
+for (Property.Getter getter : value.getProperties().getGetters()) {
     ...
 }
 ```
