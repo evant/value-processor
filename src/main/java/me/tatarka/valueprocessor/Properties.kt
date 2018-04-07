@@ -6,6 +6,7 @@ import javax.lang.model.type.TypeKind
 import javax.lang.model.type.TypeMirror
 import javax.lang.model.util.ElementFilter
 import javax.lang.model.util.Types
+import kotlin.collections.ArrayList
 
 /**
  * The properties of the value object. You can either iterator over these directly (ex: `for (Property<?> property: properties)`)
@@ -17,6 +18,10 @@ class Properties internal constructor(
      * All parameters, this includes constructor/factory params and builder methods.
      */
     val params: List<Property.Param>,
+    /**
+     * All accessors, this includes accessible fields and getters.
+     */
+    val accessors: List<Property.Accessor<*>>,
     /**
      * All accessible fields
      */
@@ -52,53 +57,88 @@ class Properties internal constructor(
     }
 
     private class Builder(val types: Types) {
-        val names = ArrayList<Property<*>>()
-        val params = ArrayList<Property.Param>()
-        val getters = ArrayList<Property.Getter>()
-        val fields = ArrayList<Property.Field>()
-        val constructorParams = ArrayList<Property.ConstructorParam>()
-        val builderParams = ArrayList<Property.BuilderParam>()
+        val names = mutableListOf<Property<*>>()
+        val params = mutableListOf<Property.Param>()
+        val accessors = mutableListOf<Property.Accessor<*>>()
+        val getters = mutableListOf<Property.Getter>()
+        val fields = mutableListOf<Property.Field>()
+        val constructorParams = mutableListOf<Property.ConstructorParam>()
+        val builderParams = mutableListOf<Property.BuilderParam>()
 
-        fun addFieldsAndGetters(targetClass: TypeElement) {
-            // getters
-            for (method in ElementFilter.methodsIn(targetClass.enclosedElements)) {
-                addGetter(targetClass, method)
-            }
-
-            // fields
-            for (field in ElementFilter.fieldsIn(targetClass.enclosedElements)) {
-                addField(field)
-            }
-
+        fun addFieldsAndGetters(
+            targetClass: TypeElement,
+            platformGetters: MutableList<Property.Getter>,
+            platformFields: MutableList<Property.Field>
+        ) {
             for (superInterface in targetClass.interfaces) {
-                addFieldsAndGetters(types.asElement(superInterface) as TypeElement)
+                addFieldsAndGetters(types.asElement(superInterface) as TypeElement, platformGetters, platformFields)
             }
 
             val superclass = targetClass.superclass
-            if (superclass.kind != TypeKind.NONE && superclass.toString() != "java.lang.Object") {
-                addFieldsAndGetters(types.asElement(targetClass.superclass) as TypeElement)
+            if (superclass.kind != TypeKind.NONE) {
+                addFieldsAndGetters(
+                    types.asElement(targetClass.superclass) as TypeElement,
+                    platformGetters,
+                    platformFields
+                )
+            }
+
+            val platformType = isPlatformType(targetClass.asType())
+
+            // fields
+            for (field in ElementFilter.fieldsIn(targetClass.enclosedElements)) {
+                if (platformFields.containsField(field)) continue
+                if (platformType) {
+                    field.tryToField()?.let(platformFields::add)
+                } else if (!platformFields.containsField(field)) {
+                    field.tryToField()?.let {
+                        fields.add(it)
+                        accessors.add(it)
+                    }
+                }
+            }
+
+            // getters
+            for (method in ElementFilter.methodsIn(targetClass.enclosedElements)) {
+                if (platformGetters.containsGetter(method)) continue
+                if (platformType) {
+                    method.tryToGetter(targetClass)?.let(platformGetters::add)
+                } else if (!getters.containsGetter(method)) {
+                    method.tryToGetter(targetClass)?.let {
+                        getters.add(it)
+                        accessors.add(it)
+                    }
+                }
             }
         }
 
-        fun addGetter(classElement: TypeElement, method: ExecutableElement) {
-            val modifiers = method.modifiers
+        fun ExecutableElement.tryToGetter(classElement: TypeElement): Property.Getter? {
             if (modifiers.contains(Modifier.PRIVATE) ||
                 modifiers.contains(Modifier.STATIC) ||
-                method.returnType.kind == TypeKind.VOID ||
-                !method.parameters.isEmpty() ||
-                isMethodToSkip(classElement, method)
+                returnType.kind == TypeKind.VOID ||
+                !parameters.isEmpty() ||
+                isMethodToSkip(classElement, this)
             ) {
-                return
+                return null
             }
-            getters.add(Property.Getter(method))
+            return Property.Getter(this)
         }
 
-        fun addField(field: VariableElement) {
-            val modifiers = field.modifiers
+        fun VariableElement.tryToField(): Property.Field? {
             if (modifiers.contains(Modifier.STATIC)) {
-                return
+                return null
             }
-            fields.add(Property.Field(field))
+            return Property.Field(this)
+        }
+
+        fun List<Property.Field>.containsField(field: VariableElement): Boolean {
+            val name = field.simpleName.toString()
+            return find { it.name == name } != null
+        }
+
+        fun List<Property.Getter>.containsGetter(getter: ExecutableElement): Boolean {
+            val name = getter.simpleName.toString()
+            return find { it.name == name } != null
         }
 
         fun addConstructorParam(param: VariableElement) {
@@ -128,7 +168,7 @@ class Properties internal constructor(
             getters
                 .filterNot { containsName(names, it) }
                 .forEach { names.add(it) }
-            return Properties(names, params, fields, getters, constructorParams, builderParams)
+            return Properties(names, params, accessors, fields, getters, constructorParams, builderParams)
         }
 
         private fun stripBeans(getters: List<Property.Getter>) {
@@ -159,6 +199,7 @@ class Properties internal constructor(
                     || containsName(getters, field)
                 ) {
                     fields.removeAt(i)
+                    accessors.remove(field)
                 }
             }
         }
@@ -169,6 +210,7 @@ class Properties internal constructor(
                 val field = findName(fields, getter)
                 if (field != null && field.element.modifiers.contains(Modifier.TRANSIENT)) {
                     getters.removeAt(i)
+                    accessors.remove(getter)
                 }
             }
         }
@@ -263,7 +305,7 @@ class Properties internal constructor(
             }
 
             val targetClass = constructionSource.targetClass
-            builder.addFieldsAndGetters(targetClass)
+            builder.addFieldsAndGetters(targetClass, mutableListOf(), mutableListOf())
 
             return builder.build()
         }

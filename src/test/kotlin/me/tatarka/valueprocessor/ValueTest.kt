@@ -162,4 +162,50 @@ class ValueTest {
             )
         )
     }
+
+    @Test
+    fun `gets props from parent class`() {
+        javac()
+            .withProcessors(ElementExtractor { env, element ->
+                val value =
+                    ValueCreator(env).fromConstructor(ElementFilter.constructorsIn(element.enclosedElements)[0])
+                expect.that(value.properties[0].name).isEqualTo("arg1")
+                expect.that(value.properties[1].name).isEqualTo("arg2")
+                expect.that(value.properties.getters).hasSize(2)
+                expect.that(value.properties.params).hasSize(2)
+            }).compile(
+                forSourceString(
+                    "test.Test",
+                    """
+                    package test;
+                    import me.tatarka.valueprocessor.Target;
+                    @Target public class Test extends Parent {
+                        private final String arg2;
+
+                        public Test(String arg1, String arg2) {
+                            super(arg1);
+                            this.arg2 = arg2;
+                        }
+
+                        public String arg2() {
+                            return arg2;
+                        }
+
+                        @Override
+                        public String getArg1() {
+                            super.getArg1();
+                        }
+                    }
+
+                    class Parent {
+                        private final String arg1;
+
+                        public String getArg1() {
+                            return arg1;
+                        }
+                    }
+                """
+                )
+            )
+    }
 }

@@ -1,7 +1,7 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 group = "me.tatarka.value"
-version = "0.1"
+version = "0.2"
 
 buildscript {
     var kotlin_version: String by extra

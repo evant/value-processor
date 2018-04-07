@@ -7,7 +7,7 @@ Helper for creating annotation processors that create/read value objects.
 
 ```groovy
 dependencies {
-  compile 'me.tatarka.value:value-processor:0.1'
+  compile 'me.tatarka.value:value-processor:0.2'
 }
 ```
 
@@ -17,7 +17,7 @@ dependencies {
 <dependency>
   <groupId>me.tatarka.value</groupId>
   <artifactId>value-processor</artifactId>
-  <version>0.1</version>
+  <version>0.2</version>
 </dependency>
 ```
 

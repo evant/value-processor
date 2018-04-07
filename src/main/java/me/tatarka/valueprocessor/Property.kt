@@ -53,9 +53,9 @@ sealed class Property<out E : Element>(val element: E) {
         return element.hashCode()
     }
 
-    class Field(field: VariableElement) : Property<VariableElement>(field)
+    class Field(field: VariableElement) : Accessor<VariableElement>(field)
 
-    class Getter(method: ExecutableElement) : Property<ExecutableElement>(method) {
+    class Getter(method: ExecutableElement) : Accessor<ExecutableElement>(method) {
 
         private var stripBean: Boolean = false
 
@@ -102,6 +102,8 @@ sealed class Property<out E : Element>(val element: E) {
     }
 
     abstract class Param(element: VariableElement) : Property<VariableElement>(element)
+
+    abstract class Accessor<out E: Element>(element: E) : Property<E>(element)
 
     class ConstructorParam(param: VariableElement) : Param(param)
 

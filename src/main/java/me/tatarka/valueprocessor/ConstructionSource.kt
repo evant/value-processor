@@ -181,10 +181,7 @@ sealed class ConstructionSource {
         if (returnType == builderClass.asType()) {
             return false
         }
-        val returnTypeName = returnType.toString()
-        return !(returnTypeName.startsWith("java.")
-                || returnTypeName.startsWith("javax.")
-                || returnTypeName.startsWith("android."))
+        return !isPlatformType(returnType)
     }
 
     private fun isReasonableBuilderMethodName(method: ExecutableElement): Boolean {
