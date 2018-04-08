@@ -1,30 +1,36 @@
 package me.tatarka.valueprocessor
 
 import javax.annotation.processing.ProcessingEnvironment
-import javax.lang.model.element.*
+import javax.lang.model.element.Modifier
+import javax.lang.model.element.TypeElement
 import javax.lang.model.util.ElementFilter
 
 /**
  * Represent a value object with some properties. You can obtain one from one of the [ValueCreator] methods.
  */
 class Value internal constructor(
-    env: ProcessingEnvironment,
-    /**
-     * Information on how to construct the value object.
-     */
-    val constructionSource: ConstructionSource
-) {
+    private val env: ProcessingEnvironment,
     /**
      * The target element.
      */
-    val element: TypeElement = constructionSource.targetClass
+    val element: TypeElement,
+
+    private val creatorSelector: Creator.Selector
+) {
+    /**
+     * The way to create the value.
+     */
+    @get:Throws(ElementException::class)
+    val creator: Creator by lazy(LazyThreadSafetyMode.NONE) {
+        creatorSelector.select(element, findCreators())
+    }
 
     /**
      * The properties of the value object.
      */
     @get:Throws(ElementException::class)
     val properties: Properties by lazy(LazyThreadSafetyMode.NONE) {
-        Properties(env.typeUtils, constructionSource)
+        Properties(env.typeUtils, creator)
     }
 
     override fun equals(other: Any?): Boolean {
@@ -42,155 +48,87 @@ class Value internal constructor(
     override fun toString(): String {
         return "$element{${properties.joinToString(", ")}}"
     }
+
+    private fun findCreators(): List<Creator> {
+        val types = env.typeUtils
+        var noArgConstructor: Creator.Constructor? = null
+        val result = mutableListOf<Creator>()
+
+        val constructorElements = ElementFilter.constructorsIn(element.enclosedElements)
+        if (constructorElements.size == 1 && constructorElements[0].parameters.isEmpty() && !constructorElements[0].modifiers.contains(
+                Modifier.PRIVATE
+            )
+        ) {
+            noArgConstructor = Creator.Constructor(element, constructorElements[0])
+        } else {
+            for (constructor in constructorElements) {
+                if (constructor.modifiers.contains(Modifier.PRIVATE)) continue
+                result.add(Creator.Constructor(element, constructor))
+            }
+        }
+
+        for (method in ElementFilter.methodsIn(element.enclosedElements)) {
+            if (method.modifiers.contains(Modifier.PRIVATE)
+                || !method.modifiers.contains(Modifier.STATIC)
+                || !types.isSameType(types.erasure(method.returnType), types.erasure(element.asType()))
+            ) continue
+            result.add(Creator.Factory(element, method))
+        }
+        println("$element")
+
+        for (type in ElementFilter.typesIn(element.enclosedElements)) {
+            println("$type $element")
+            if (type.modifiers.contains(Modifier.PRIVATE) || !type.modifiers.contains(Modifier.STATIC)) continue
+            val buildMethod = findBuildMethod(element, type) ?: continue
+            var noArgBuilderConstructor: Creator.BuilderConstructor? = null
+            val builderConstructorElements = ElementFilter.constructorsIn(type.enclosedElements)
+            val builderResults = mutableListOf<Creator>()
+            if (builderConstructorElements.size == 1 && builderConstructorElements[0].parameters.isEmpty() && !builderConstructorElements[0].modifiers.contains(
+                    Modifier.PRIVATE
+                )
+            ) {
+                noArgBuilderConstructor =
+                        Creator.BuilderConstructor(element, type, buildMethod, builderConstructorElements[0])
+            } else {
+                for (constructor in builderConstructorElements) {
+                    if (constructor.modifiers.contains(Modifier.PRIVATE)) continue
+                    builderResults.add(Creator.BuilderConstructor(element, type, buildMethod, constructor))
+                }
+            }
+            for (method in ElementFilter.methodsIn(element.enclosedElements)) {
+                println("$type $element $method")
+                if (method.modifiers.contains(Modifier.PRIVATE)
+                    || !method.modifiers.contains(Modifier.STATIC)
+                    || !types.isSameType(types.erasure(method.returnType), types.erasure(type.asType()))
+                ) continue
+                builderResults.add(Creator.BuilderFactory(element, type, buildMethod, method))
+            }
+            if (builderResults.isEmpty() && noArgBuilderConstructor != null) {
+                builderResults.add(noArgBuilderConstructor)
+            }
+            result.addAll(builderResults)
+        }
+
+        if (result.isEmpty() && noArgConstructor != null) {
+            result.add(noArgConstructor)
+        }
+
+        return result
+    }
 }
 
 /**
  * Creates instances of [Value] from various starting elements.
  */
-class ValueCreator(private val env: ProcessingEnvironment) {
+class ValueCreator @JvmOverloads constructor(
+    private val env: ProcessingEnvironment,
+    private val creatorSelector: Creator.Selector = Creator.DefaultSelector()
+) {
     /**
-     * Creates a [Value] from the given element. This element can be the [TypeElement] of the target class, or a
-     * specific constructor or factory method. If [isBuilder] is true, then the element represents the builder class,
-     * constructor or factory method.
+     * Creates a [Value] from the given class element.
      */
     @Throws(ElementException::class)
-    fun from(element: Element, isBuilder: Boolean = false): Value = when (element) {
-        is TypeElement -> if (isBuilder) fromBuilderClass(element) else fromClass(element)
-        is ExecutableElement -> {
-            if (element.kind == ElementKind.CONSTRUCTOR) {
-                if (isBuilder) fromBuilderConstructor(element) else fromConstructor(element)
-            } else {
-                if (isBuilder) fromBuilderFactory(element) else fromFactory(element)
-            }
-        }
-        else -> {
-            throw IllegalArgumentException("Expected TypeElement or ExecutableElement but got: $element")
-        }
-    }
-
-    /**
-     * Creates a [Value] from the given constructor element. ex:
-     * ```
-     * public class Value {
-     * >   public Value(int arg1) { ... }
-     * }
-     * ```
-     */
-    @Throws(ElementException::class)
-    fun fromConstructor(constructor: ExecutableElement): Value {
-        checkKind(constructor, ElementKind.CONSTRUCTOR)
-        return create(ConstructionSource.Constructor(constructor))
-    }
-
-    /**
-     * Creates a [Value] from the given builder's constructor element. ex:
-     * ```
-     * public class Builder {
-     * >   public Builder() { ... }
-     *     public Value build() { ... }
-     * }
-     * ```
-     */
-    @Throws(ElementException::class)
-    fun fromBuilderConstructor(constructor: ExecutableElement): Value {
-        checkKind(constructor, ElementKind.CONSTRUCTOR)
-        return create(ConstructionSource.BuilderConstructor(env.typeUtils, constructor))
-    }
-
-    /**
-     * Creates a [Value] from the given factory method element. ex:
-     * ```
-     * public class Value {
-     * >   public static Value create(int arg) { ... }
-     * }
-     * ```
-     */
-    @Throws(ElementException::class)
-    fun fromFactory(factory: ExecutableElement): Value {
-        checkKind(factory, ElementKind.METHOD)
-        return create(ConstructionSource.Factory(env.typeUtils, factory))
-    }
-
-    /**
-     * Creates a [Value] from the given builder factory method element. ex:
-     * ```
-     * public class Value {
-     * >   public static Builder builder() { ... }
-     *     public static class Builder { ... }
-     * }
-     * ```
-     */
-    @Throws(ElementException::class)
-    fun fromBuilderFactory(builderFactory: ExecutableElement): Value {
-        checkKind(builderFactory, ElementKind.METHOD)
-        return create(ConstructionSource.BuilderFactory(env.typeUtils, builderFactory))
-    }
-
-    /**
-     * Creates a [Value] from the given class. ex:
-     * ```
-     * > public class Value { ... }
-     * ```
-     */
-    @Throws(ElementException::class)
-    fun fromClass(targetClass: TypeElement): Value {
-        val creator = findConstructorOrFactory(targetClass)
-        return if (creator.kind == ElementKind.CONSTRUCTOR) fromConstructor(creator) else fromFactory(creator)
-    }
-
-    /**
-     * Creates a [Value] from the given builder class. ex:
-     * ```
-     * > public class Builder {
-     *     public Value build() { ... }
-     * }
-     * ```
-     */
-    @Throws(ElementException::class)
-    fun fromBuilderClass(builderClass: TypeElement): Value {
-        val creator = findConstructorOrFactory(builderClass)
-        return if (creator.kind == ElementKind.CONSTRUCTOR) fromBuilderConstructor(creator)
-        else fromBuilderFactory(creator)
-    }
-
-    private fun findConstructorOrFactory(klass: TypeElement): ExecutableElement {
-        var noArgConstructor: ExecutableElement? = null
-        val constructors = ElementFilter.constructorsIn(klass.enclosedElements)
-        if (constructors.size == 1) {
-            val constructor = constructors[0]
-            if (constructor.parameters.isEmpty()) {
-                noArgConstructor = constructor
-                constructors.removeAt(0)
-            }
-        }
-        for (method in ElementFilter.methodsIn(klass.enclosedElements)) {
-            val modifiers = method.modifiers
-            if (modifiers.contains(Modifier.STATIC)
-                && !modifiers.contains(Modifier.PRIVATE)
-                && method.returnType == klass.asType()
-            ) {
-                constructors.add(method)
-            }
-        }
-        if (constructors.isEmpty() && noArgConstructor != null) {
-            constructors.add(noArgConstructor)
-        }
-        if (constructors.size == 1) {
-            return constructors[0]
-        } else {
-            val messages =
-                mutableListOf(ElementException.Message("More than one constructor or factory method found.", klass))
-            constructors.mapTo(messages) { ElementException.Message("  $it", it) }
-            throw ElementException(messages)
-        }
-    }
-
-    private fun create(constructionSource: ConstructionSource): Value = Value(env, constructionSource)
-
-    @Suppress("NOTHING_TO_INLINE")
-    private inline fun checkKind(element: Element, kind: ElementKind) {
-        if (element.kind != kind) {
-            throw IllegalArgumentException("expected $kind but got: $element")
-        }
+    fun from(element: TypeElement): Value {
+        return Value(env, element, creatorSelector)
     }
 }

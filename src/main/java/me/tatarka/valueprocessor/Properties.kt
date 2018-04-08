@@ -290,21 +290,21 @@ class Properties internal constructor(
             return element.annotationMirrors.any { it.annotationType.toString() == "kotlin.Metadata" }
         }
 
-        operator fun invoke(types: Types, constructionSource: ConstructionSource): Properties {
+        operator fun invoke(types: Types, creator: Creator): Properties {
             val builder = Builder(types)
             // constructor params
-            for (param in constructionSource.constructionElement.parameters) {
+            for (param in creator.element.parameters) {
                 builder.addConstructorParam(param)
             }
 
-            if (constructionSource is ConstructionSource.Builder) {
-                val builderClass = constructionSource.builderClass
+            if (creator is Creator.Builder) {
+                val builderClass = creator.builderClass
                 for (method in ElementFilter.methodsIn(builderClass.enclosedElements)) {
                     builder.addBuilderParam(builderClass.asType(), method)
                 }
             }
 
-            val targetClass = constructionSource.targetClass
+            val targetClass = creator.targetClass
             builder.addFieldsAndGetters(targetClass, mutableListOf(), mutableListOf())
 
             return builder.build()
